@@ -1,9 +1,17 @@
 #![no_std]
 #![no_main]
 
+mod screen;
+
+use core::fmt::Write;
+#[cfg(not(test))]
 use core::panic::PanicInfo;
 
+use bootloader_api::info::FrameBuffer;
+use screen::ScreenWriter;
+
 /// This function is called on panic.
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     loop {}
@@ -14,16 +22,22 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
         panic!("No framebuffer given in the boot info.");
     };
 
-    let buffer = fb.buffer_mut();
+    let buffer = unsafe {
+        let owned = core::ptr::read(fb as *mut FrameBuffer);
 
-    for (i, pixel) in buffer.iter_mut().enumerate() {
-        match i % 3 {
-            0 => *pixel = 0x00,
-            1 => *pixel = 0x00,
-            2 => *pixel = 0xff,
-            _ => unreachable!(),
-        }
+        owned.into_buffer()
+    };
+
+    let mut screen_writer = ScreenWriter::from_bootinfo(buffer, fb.info());
+
+    for _ in 0..20 {
+        screen_writer.print_char('X');
     }
+    screen_writer.print_char('�');
+
+    writeln!(screen_writer).expect("ss");
+
+    writeln!(screen_writer, "Hellooooo").expect("WRdf");
 
     loop {}
 }
