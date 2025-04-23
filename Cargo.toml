@@ -1,0 +1,21 @@
+[package]
+name = "ttmp"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+members = ["kernel"]
+
+[build-dependencies]
+bootloader = "0.11"
+kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
+
+[dependencies]
+
+# the profile used for `cargo build`
+[profile.dev]
+panic = "abort" # disable stack unwinding on panic
+
+# the profile used for `cargo build --release`
+[profile.release]
+panic = "abort" # disable stack unwinding on panic
