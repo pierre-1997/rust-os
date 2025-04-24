@@ -1,9 +1,9 @@
 #![no_std]
 #![no_main]
 
+#[macro_use]
 mod screen;
 
-use core::fmt::Write;
 #[cfg(not(test))]
 use core::panic::PanicInfo;
 
@@ -13,7 +13,9 @@ use screen::ScreenWriter;
 /// This function is called on panic.
 #[cfg(not(test))]
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
+    print!("PANIC!!! ");
+    println!("{}", info.message());
     loop {}
 }
 
@@ -28,16 +30,10 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
         owned.into_buffer()
     };
 
-    let mut screen_writer = ScreenWriter::from_bootinfo(buffer, fb.info());
+    ScreenWriter::init(buffer, fb.info());
 
-    for _ in 0..20 {
-        screen_writer.print_char('X');
-    }
-    screen_writer.print_char('�');
-
-    writeln!(screen_writer).expect("ss");
-
-    writeln!(screen_writer, "Hellooooo").expect("WRdf");
+    println!("HElllozz");
+    println!("AGAIN");
 
     loop {}
 }

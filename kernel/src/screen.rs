@@ -11,13 +11,14 @@
 //! - We only support `3 bytes per pixel` formats ?
 //! - Investigate: For now, `'�'` as a backup char seems to crash stuff.
 
-use core::fmt::Write;
+use core::{cell::UnsafeCell, fmt::Write};
 
 use noto_sans_mono_bitmap::{
     get_raster, get_raster_width, FontWeight, RasterHeight, RasterizedChar,
 };
 
 const UNKNOWN_CHAR: char = ' '; // '�';
+const BG_COLOR: u8 = 0x00; // Black
 
 const HORIZONTAL_BORDER_PADDING: usize = 30;
 const VERTICAL_BORDER_PADDING: usize = 30;
@@ -31,7 +32,7 @@ pub struct ScreenWriter {
     /// TODO: Put this behind a `Mutex` to allow multiple writers?
     buffer: &'static mut [u8],
 
-    fb_info: bootloader_api::info::FrameBufferInfo,
+    info: bootloader_api::info::FrameBufferInfo,
 
     cur_x: usize,
     cur_y: usize,
@@ -40,40 +41,106 @@ pub struct ScreenWriter {
     cur_font_height: RasterHeight,
 }
 
+pub struct ScreenWriterHolder(pub UnsafeCell<Option<ScreenWriter>>);
+
+pub static SCREEN_WRITER: ScreenWriterHolder = ScreenWriterHolder(UnsafeCell::new(None));
+
+unsafe impl Sync for ScreenWriterHolder {}
+
+macro_rules! print {
+    ($($arg:tt)*) => {
+        unsafe {
+            use core::fmt::Write as FmtWrite;
+            let writer = match (*$crate::screen::SCREEN_WRITER.0.get()).as_mut() {
+                Some(w) => w,
+                None => {
+                    panic!("Attempted to use ScreenWriter before calling init.")
+                }
+            };
+
+            write!(&mut *(writer), $($arg)*).expect("Failed to print")
+        }
+    }
+}
+
+macro_rules! println {
+    ($($arg:tt)*) => {
+        print!($($arg)*);
+        print!("\n");
+    }
+}
+
+/* enum LogLevel {
+    Debug,
+    Info,
+    Warning,
+    Error,
+    Panic,
+}
+
+impl fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            LogLevel::Debug => "DEBUG",
+            LogLevel::Info => "INFO",
+            LogLevel::Warning => "WARNING",
+            LogLevel::Error => "ERROR",
+            LogLevel::Panic => "KERNEL PANIC",
+        };
+
+        f.write_str(s);
+
+        Ok(())
+    }
+}
+
+// #[derive(Debug)]
+struct Log {
+    file: &'static str,
+    line: usize,
+    level: LogLevel,
+    msg: String,
+} */
+
 impl ScreenWriter {
+    /// This function initializes `SCREEN_WRITER` given a frame buffer and its relative
+    /// information.
+    /// It *has to be called* before being able to call the logging macros.
+    ///
+    ///
     /// NOTE: For now we'll use the build-defaults font sizes (weights and height). If we want to
     /// support more, we just need to change the compile features of `noto_sans_mono_bitmap`.
-    pub fn from_bootinfo(
-        buf: &'static mut [u8],
-        fb_info: bootloader_api::info::FrameBufferInfo,
-    ) -> Self {
+    pub fn init(buffer: &'static mut [u8], info: bootloader_api::info::FrameBufferInfo) {
         // FIXME: For now we force the 3 bytes per pixel formats (e.g. either RGB or BGR).
-        assert_eq!(fb_info.bytes_per_pixel, 3);
+        assert_eq!(info.bytes_per_pixel, 3);
 
         let mut writer = Self {
-            buffer: buf,
-            fb_info,
+            buffer,
+            info,
             cur_x: HORIZONTAL_BORDER_PADDING,
             cur_y: VERTICAL_BORDER_PADDING,
             cur_font_weight: FontWeight::Regular,
             cur_font_height: RasterHeight::Size16,
-            // cur_font_color: Color::RGB(0x00, 0xff, 0x00),
-            // cur_bg_color: DEFAULT_BACKGROUND_COLOR,
         };
 
+        // Clear the whole screen.
         writer.clear();
 
-        writer
+        unsafe {
+            SCREEN_WRITER.0.get().write(Some(writer));
+        }
     }
 
+    /// Clears the screen and fill it with `BG_COLOR`.
     pub fn clear(&mut self) {
         self.cur_x = HORIZONTAL_BORDER_PADDING;
         self.cur_y = VERTICAL_BORDER_PADDING;
 
         // Fill with Black.
-        self.buffer.fill(0x00);
+        self.buffer.fill(BG_COLOR)
     }
 
+    /// Write a single character on the screen at the current position.
     pub fn print_char(&mut self, c: char) {
         match c {
             '\n' => self.newline(),
@@ -81,13 +148,13 @@ impl ScreenWriter {
             c => {
                 // If the char will go over the right border, do a newline
                 let new_x = self.cur_x + CHAR_WIDTH;
-                if new_x > self.fb_info.width - HORIZONTAL_BORDER_PADDING {
+                if new_x > self.info.width - HORIZONTAL_BORDER_PADDING {
                     self.newline();
                 }
                 // If the char will go over the bottom border, clear the screen.
                 // TODO: Implement screen scrolling ?
                 let new_y = self.cur_y + CHAR_HEIGHT;
-                if new_y > self.fb_info.height - VERTICAL_BORDER_PADDING {
+                if new_y > self.info.height - VERTICAL_BORDER_PADDING {
                     self.clear();
                 }
 
@@ -96,10 +163,12 @@ impl ScreenWriter {
         }
     }
 
+    /// Converts a character to its rendered bitmap.
     fn get_rendered_char(&self, c: char) -> RasterizedChar {
         get_raster(c, self.cur_font_weight, self.cur_font_height).unwrap_or(self.backup_char())
     }
 
+    /// Writes a whole character on the screen.
     fn write_rendered_char(&mut self, char_pixels: RasterizedChar) {
         for (yi, row) in char_pixels.raster().iter().enumerate() {
             for (xi, pixel) in row.iter().enumerate() {
@@ -111,11 +180,13 @@ impl ScreenWriter {
         self.cur_x += char_pixels.width() + CHAR_SPACING;
     }
 
-    /// `intensity` is basically a grayscale for now.
+    /// Writes a single pixel on the screen.
+    ///
+    /// NOTE: `intensity` is basically a grayscale for now.
     pub fn write_pixel(&mut self, x: usize, y: usize, intensity: u8) {
-        let idx = (y * self.fb_info.stride + x) * self.fb_info.bytes_per_pixel;
+        let idx = (y * self.info.stride + x) * self.info.bytes_per_pixel;
         // NOTE: This could be behind a `hardened` feature.
-        assert!(idx < self.fb_info.byte_len);
+        assert!(idx < self.info.byte_len);
 
         // For now, we manually write the three RGB values. Will fix this when adding color
         // support.
@@ -124,15 +195,21 @@ impl ScreenWriter {
         self.buffer[idx + 2] = intensity;
     }
 
+    /// Goes to the beginning of the next line.
     fn newline(&mut self) {
         self.cur_y += CHAR_HEIGHT + LINE_SPACING;
         self.carriage_return();
     }
 
+    /// Returns to the beginning of the current line.
     fn carriage_return(&mut self) {
         self.cur_x = HORIZONTAL_BORDER_PADDING;
     }
 
+    /// Gets the default char `UNKNOWN_CHAR` ready to be rendered.
+    ///
+    /// TODO: Maybe this should be generated only once ever using a `static` ?
+    ///
     /// NOTE: This panics if unable to generate an `UNKNOWN_CHAR` with the current font weight and
     /// height.
     fn backup_char(&self) -> RasterizedChar {

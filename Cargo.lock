@@ -256,6 +256,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
+name = "rust-os"
+version = "0.1.0"
+dependencies = [
+ "bootloader",
+ "kernel",
+]
+
+[[package]]
 name = "rustix"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -363,14 +371,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "ttmp"
-version = "0.1.0"
-dependencies = [
- "bootloader",
- "kernel",
 ]
 
 [[package]]
