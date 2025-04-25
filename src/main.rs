@@ -13,8 +13,9 @@ fn main() {
         cmd.arg("-drive")
             .arg(format!("format=raw,file={uefi_path}"));
     } else {
-        cmd.arg("-drive")
-            .arg(format!("format=raw,file={bios_path}"));
+        cmd
+            // .args(["-m", "500M"])
+            .args(["-drive", &format!("format=raw,file={bios_path}")]);
     }
     let mut child = cmd.spawn().unwrap();
     child.wait().unwrap();
