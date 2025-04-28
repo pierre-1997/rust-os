@@ -1,9 +1,13 @@
 #![no_std]
 #![no_main]
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test_runner)]
+#![reexport_test_harness_main = "test_main"]
 
 #[macro_use]
 mod screen;
 mod allocator;
+mod io;
 
 extern crate alloc;
 
@@ -12,6 +16,21 @@ use core::panic::PanicInfo;
 
 use bootloader_api::{config::Mapping, info::FrameBuffer, BootloaderConfig};
 use screen::ScreenWriter;
+
+#[cfg(test)]
+pub fn test_runner(tests: &[&dyn Fn()]) {
+    println!("Running {} tests", tests.len());
+    for test in tests {
+        test();
+    }
+}
+
+#[test_case]
+fn trivial_assertion() {
+    print!("trivial assertion... ");
+    assert_eq!(1, 1);
+    println!("[ok]");
+}
 
 /// This function is called on panic.
 #[cfg(not(test))]
@@ -36,7 +55,6 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
 
         owned.into_buffer()
     };
-
     ScreenWriter::init(buffer, fb.info());
 
     println!("HElllozz");
@@ -44,6 +62,9 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
 
     allocator::init(boot_info);
     allocator::print_free_segments();
+
+    #[cfg(test)]
+    test_main();
 
     {
         let mut v: alloc::vec::Vec<usize> = alloc::vec::Vec::with_capacity(10);
@@ -70,3 +91,11 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
 };
 
 bootloader_api::entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test123() {
+        assert_eq!(1, 2);
+    }
+}
