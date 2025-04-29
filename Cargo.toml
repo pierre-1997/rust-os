@@ -2,6 +2,7 @@
 name = "rust-os"
 version = "0.1.0"
 edition = "2021"
+default-run = "rust-os"
 
 [workspace]
 members = ["kernel"]
@@ -10,7 +11,13 @@ members = ["kernel"]
 bootloader = "0.11"
 kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
 
+[[bin]]
+name = "test-runner"
+path = "src/test_runner.rs"
+
 [dependencies]
+regex = "1.11"
+bootloader = "0.11"
 
 # the profile used for `cargo build`
 [profile.dev]

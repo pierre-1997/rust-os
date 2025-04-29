@@ -1,40 +1,23 @@
 #![no_std]
 #![no_main]
 #![feature(custom_test_frameworks)]
-#![test_runner(crate::test_runner)]
+#![test_runner(crate::testing::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
 #[macro_use]
 mod io;
 mod allocator;
+#[cfg(test)]
+mod testing;
 
 extern crate alloc;
 
-#[cfg(not(test))]
 use core::panic::PanicInfo;
 
 use bootloader_api::{config::Mapping, info::FrameBuffer, BootloaderConfig};
 use io::{serial::SerialWriter, vga::VGAWriter};
 
-#[cfg(test)]
-pub fn test_runner(tests: &[&dyn Fn()]) {
-    println!("Running {} tests", tests.len());
-    for test in tests {
-        test();
-    }
-}
-
-#[test_case]
-fn trivial_assertion() {
-    print!("trivial assertion... ");
-    assert_eq!(1, 1);
-    println!("[ok]");
-}
-
 /// This function is called on panic.
-///
-/// FIXME: Remove this fking `cfg(not(test))`
-#[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     print!("PANIC!!! ");
@@ -59,15 +42,19 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
     VGAWriter::init(&mut owned_fb);
     SerialWriter::init_serial().expect("Failed to initialize Serial writer.");
 
+    #[cfg(test)]
+    {
+        test_main();
+        // TODO: Exit here
+        // io::exit(0);
+    }
+
     println!("HElllozz");
     println!("AGAIN");
 
     // Initialize allocator.
     allocator::init(boot_info);
     allocator::print_free_segments();
-
-    #[cfg(test)]
-    test_main();
 
     {
         let mut v: alloc::vec::Vec<usize> = alloc::vec::Vec::with_capacity(10);
