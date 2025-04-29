@@ -13,6 +13,7 @@
 
 use core::{cell::UnsafeCell, fmt::Write};
 
+use bootloader_api::info::FrameBuffer;
 use noto_sans_mono_bitmap::{
     get_raster, get_raster_width, FontWeight, RasterHeight, RasterizedChar,
 };
@@ -28,7 +29,7 @@ const CHAR_HEIGHT: usize = RasterHeight::Size16.val();
 const CHAR_WIDTH: usize = get_raster_width(FontWeight::Regular, RasterHeight::Size16);
 const LINE_SPACING: usize = 2;
 
-pub struct ScreenWriter {
+pub struct VGAWriter {
     /// TODO: Put this behind a `Mutex` to allow multiple writers?
     buffer: &'static mut [u8],
 
@@ -40,69 +41,14 @@ pub struct ScreenWriter {
     cur_font_weight: FontWeight,
     cur_font_height: RasterHeight,
 }
+/// NOTE: We use `UnsafeCell` to achieve interior mutability here.
+pub struct VGAWriterHolder(pub UnsafeCell<Option<VGAWriter>>);
 
-pub struct ScreenWriterHolder(pub UnsafeCell<Option<ScreenWriter>>);
+unsafe impl Sync for VGAWriterHolder {}
 
-pub static SCREEN_WRITER: ScreenWriterHolder = ScreenWriterHolder(UnsafeCell::new(None));
+pub static SCREEN_WRITER: VGAWriterHolder = VGAWriterHolder(UnsafeCell::new(None));
 
-unsafe impl Sync for ScreenWriterHolder {}
-
-macro_rules! print {
-    ($($arg:tt)*) => {
-        unsafe {
-            use core::fmt::Write as FmtWrite;
-            let writer = match (*$crate::screen::SCREEN_WRITER.0.get()).as_mut() {
-                Some(w) => w,
-                None => {
-                    panic!("Attempted to use ScreenWriter before calling init.")
-                }
-            };
-
-            write!(&mut *(writer), $($arg)*).expect("Failed to print")
-        }
-    }
-}
-
-macro_rules! println {
-    ($($arg:tt)*) => {
-        print!($($arg)*);
-        print!("\n");
-    }
-}
-
-/* enum LogLevel {
-    Debug,
-    Info,
-    Warning,
-    Error,
-    Panic,
-}
-
-impl fmt::Display for LogLevel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            LogLevel::Debug => "DEBUG",
-            LogLevel::Info => "INFO",
-            LogLevel::Warning => "WARNING",
-            LogLevel::Error => "ERROR",
-            LogLevel::Panic => "KERNEL PANIC",
-        };
-
-        f.write_str(s);
-
-        Ok(())
-    }
-}
-
-// #[derive(Debug)]
-struct Log {
-    file: &'static str,
-    line: usize,
-    level: LogLevel,
-    msg: String,
-} */
-
-impl ScreenWriter {
+impl VGAWriter {
     /// This function initializes `SCREEN_WRITER` given a frame buffer and its relative
     /// information.
     /// It *has to be called* before being able to call the logging macros.
@@ -110,9 +56,17 @@ impl ScreenWriter {
     ///
     /// NOTE: For now we'll use the build-defaults font sizes (weights and height). If we want to
     /// support more, we just need to change the compile features of `noto_sans_mono_bitmap`.
-    pub fn init(buffer: &'static mut [u8], info: bootloader_api::info::FrameBufferInfo) {
+    pub fn init(fb: &mut FrameBuffer) {
+        let info = fb.info();
+
         // FIXME: For now we force the 3 bytes per pixel formats (e.g. either RGB or BGR).
         assert_eq!(info.bytes_per_pixel, 3);
+
+        let buffer = unsafe {
+            let owned = core::ptr::read(fb as *mut FrameBuffer);
+
+            owned.into_buffer()
+        };
 
         let mut writer = Self {
             buffer,
@@ -218,7 +172,8 @@ impl ScreenWriter {
     }
 }
 
-impl Write for ScreenWriter {
+/// So that we can use the nifty `write!()` macro.
+impl Write for VGAWriter {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for c in s.chars() {
             self.print_char(c);

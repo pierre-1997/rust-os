@@ -198,7 +198,7 @@ unsafe fn clean_free_segment_list(head: *mut FreeSegment) {
     let mut cursor = head;
 
     while !cursor.is_null() {
-        if (*cursor).get_end() == (*cursor).next_free as *const u8 {
+        if core::ptr::eq((*cursor).get_end(), (*cursor).next_free as *const u8) {
             cursor.write(FreeSegment {
                 size: (*cursor).size
                     + core::mem::size_of::<FreeSegment>()

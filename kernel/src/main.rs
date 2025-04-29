@@ -5,9 +5,8 @@
 #![reexport_test_harness_main = "test_main"]
 
 #[macro_use]
-mod screen;
-mod allocator;
 mod io;
+mod allocator;
 
 extern crate alloc;
 
@@ -15,7 +14,7 @@ extern crate alloc;
 use core::panic::PanicInfo;
 
 use bootloader_api::{config::Mapping, info::FrameBuffer, BootloaderConfig};
-use screen::ScreenWriter;
+use io::{serial::SerialWriter, vga::VGAWriter};
 
 #[cfg(test)]
 pub fn test_runner(tests: &[&dyn Fn()]) {
@@ -33,6 +32,8 @@ fn trivial_assertion() {
 }
 
 /// This function is called on panic.
+///
+/// FIXME: Remove this fking `cfg(not(test))`
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -46,20 +47,22 @@ fn panic(info: &PanicInfo) -> ! {
 }
 
 fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
-    let bootloader_api::info::Optional::Some(fb) = &mut boot_info.framebuffer else {
-        panic!("No framebuffer given in the boot info.");
+    // NOTE: We extract the `FrameBuffer` here so that we can still borrow `boot_info` later on
+    let mut owned_fb = unsafe {
+        let bootloader_api::info::Optional::Some(fb) = &mut boot_info.framebuffer else {
+            panic!("Missing framebuffer in boot info.");
+        };
+        core::ptr::read(fb as *mut FrameBuffer)
     };
 
-    let buffer = unsafe {
-        let owned = core::ptr::read(fb as *mut FrameBuffer);
-
-        owned.into_buffer()
-    };
-    ScreenWriter::init(buffer, fb.info());
+    // Initialize VGA and Serial port writing (e.g. text outputs).
+    VGAWriter::init(&mut owned_fb);
+    SerialWriter::init_serial().expect("Failed to initialize Serial writer.");
 
     println!("HElllozz");
     println!("AGAIN");
 
+    // Initialize allocator.
     allocator::init(boot_info);
     allocator::print_free_segments();
 
@@ -91,11 +94,3 @@ pub static BOOTLOADER_CONFIG: BootloaderConfig = {
 };
 
 bootloader_api::entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test123() {
-        assert_eq!(1, 2);
-    }
-}

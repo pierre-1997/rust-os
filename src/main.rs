@@ -14,7 +14,11 @@ fn main() {
             .arg(format!("format=raw,file={uefi_path}"));
     } else {
         cmd
+            // Use this to change the RAM size
             // .args(["-m", "500M"])
+            // Use this to write the OS output to a log file
+            // .args(["-serial", "file:serial.log"])
+            .args(["-serial", "stdio"])
             .args(["-drive", &format!("format=raw,file={bios_path}")]);
     }
     let mut child = cmd.spawn().unwrap();
