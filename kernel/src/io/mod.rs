@@ -27,6 +27,16 @@ unsafe fn outb(port: u16, value: u8) {
     );
 }
 
+pub fn exit(code: u8) {
+    serial::wait_until_done();
+
+    const QEMU_EXIT_PORT: u16 = 0xf4;
+
+    unsafe {
+        outb(QEMU_EXIT_PORT, code);
+    }
+}
+
 macro_rules! print {
     ($($arg:tt)*) => {
         unsafe {

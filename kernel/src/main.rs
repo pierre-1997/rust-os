@@ -26,6 +26,8 @@ fn panic(info: &PanicInfo) -> ! {
     }
 
     println!("{}", info.message());
+
+    io::exit(1);
     loop {}
 }
 
@@ -46,7 +48,7 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
     {
         test_main();
         // TODO: Exit here
-        // io::exit(0);
+        io::exit(1);
     }
 
     println!("HElllozz");
@@ -69,6 +71,8 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
         v1.push(3);
         println!("v = {:?}", v1);
     }
+
+    io::exit(0);
 
     loop {}
 }

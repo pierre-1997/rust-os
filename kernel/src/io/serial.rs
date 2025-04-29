@@ -11,6 +11,10 @@ pub static SERIAL_WRITER: SerialWriterHolder = SerialWriterHolder(UnsafeCell::ne
 /// COM1 serial port within Qemu.
 const PORT: u16 = 0x3f8;
 
+pub fn wait_until_done() {
+    unsafe { while !is_transmit_empty() {} }
+}
+
 /// Checks if there is already something being transmitted.
 unsafe fn is_transmit_empty() -> bool {
     (inb(PORT + 5) & 0x20) != 0

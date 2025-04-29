@@ -18,6 +18,7 @@ fn main() {
             // .args(["-m", "500M"])
             // Use this to write the OS output to a log file
             // .args(["-serial", "file:serial.log"])
+            .args(["-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"])
             .args(["-serial", "stdio"])
             .args(["-drive", &format!("format=raw,file={bios_path}")]);
     }
