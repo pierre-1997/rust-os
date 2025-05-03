@@ -41,14 +41,6 @@ macro_rules! print {
     ($($arg:tt)*) => {
         unsafe {
             use core::fmt::Write as FmtWrite;
-            let writer = match (*$crate::io::vga::SCREEN_WRITER.0.get()).as_mut() {
-                Some(w) => w,
-                None => {
-                    panic!("Attempted to use ScreenWriter before calling init.")
-                }
-            };
-
-            write!(&mut *(writer), $($arg)*).expect("Failed to write to VGA.");
 
             let mut writer = match (*$crate::io::serial::SERIAL_WRITER.0.get()).as_mut()
                 {
@@ -59,6 +51,13 @@ macro_rules! print {
             };
 
             write!(&mut (writer), $($arg)*).expect("Failed to write in serial.");
+            let writer = match (*$crate::io::vga::SCREEN_WRITER.0.get()).as_mut() {
+                Some(w) => w,
+                None => {
+                    panic!("Attempted to use ScreenWriter before calling init.")
+                }
+            };
+            write!(&mut *(writer), $($arg)*).expect("Failed to write to VGA.");
         }
     }
 }

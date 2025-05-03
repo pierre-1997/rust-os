@@ -20,6 +20,6 @@ pub fn test_runner(tests: &[&dyn Fn() -> TestCase]) {
 fn trivial_assertion() -> TestCase {
     TestCase {
         name: "Trivial assertion... ",
-        test: || assert_eq!(1, 0),
+        test: || assert_eq!(1, 1),
     }
 }

@@ -90,15 +90,11 @@ pub fn init(boot_info: &bootloader_api::BootInfo) {
     let mut head: *mut FreeSegment = core::ptr::null_mut();
     let mut tail: *mut FreeSegment = core::ptr::null_mut();
 
-    // We only work using mapped physical memory.
-    let bootloader_api::info::Optional::Some(physical_memory_offset) =
-        boot_info.physical_memory_offset
-    else {
-        panic!("Physical memory is not mapped !!");
+    let Some(physical_memory_offset) = crate::PHYS_MEM_OFFSET.0.get() else {
+        panic!("Physical memory offset should have been set by now.")
     };
 
     println!("\n----- Allocator Initialization -----");
-    println!("Physical memory offset: {}", physical_memory_offset);
 
     // Get the kernel section because we can't use memory that overlaps with it.
     let kernel_start = boot_info.kernel_addr;
@@ -161,7 +157,7 @@ pub fn init(boot_info: &bootloader_api::BootInfo) {
         }
     }
 
-    // FIXME: Here, we make sure we found a single memory region that we can use.
+    // FIXME: Here, we enforce that we found a single memory region that we can use.
     unsafe {
         assert!((*head).next_free.is_null());
     }

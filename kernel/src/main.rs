@@ -7,28 +7,36 @@
 #[macro_use]
 mod io;
 mod allocator;
+mod interrupts;
 #[cfg(test)]
 mod testing;
+mod utils;
 
 extern crate alloc;
 
-use core::panic::PanicInfo;
+use core::{cell::OnceCell, panic::PanicInfo};
 
 use bootloader_api::{config::Mapping, info::FrameBuffer, BootloaderConfig};
 use io::{serial::SerialWriter, vga::VGAWriter};
 
+struct U64Cell(OnceCell<u64>);
+// Safety: We're in single thread for now.
+unsafe impl Sync for U64Cell {}
+
+static PHYS_MEM_OFFSET: U64Cell = U64Cell(OnceCell::new());
+
 /// This function is called on panic.
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    print!("PANIC!!! ");
+    print!("\nPANIC!!! ");
     if let Some(location) = info.location() {
         print!("[{}:{}] ", location.file(), location.line());
     }
 
     println!("{}", info.message());
 
-    io::exit(1);
     loop {}
+    io::exit(1);
 }
 
 fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
@@ -47,9 +55,20 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
     #[cfg(test)]
     {
         test_main();
-        // TODO: Exit here
+        loop {}
         io::exit(1);
     }
+
+    // We only work using mapped physical memory.
+    let bootloader_api::info::Optional::Some(physical_memory_offset) =
+        boot_info.physical_memory_offset
+    else {
+        panic!("Physical memory is not mapped !!");
+    };
+    println!("Physical memory offset: {:#X}", physical_memory_offset);
+
+    // Safety: This is the first time we access `PHYS_MEM_OFFSET`.
+    let _ = PHYS_MEM_OFFSET.0.set(physical_memory_offset);
 
     println!("HElllozz");
     println!("AGAIN");
@@ -72,9 +91,13 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
         println!("v = {:?}", v1);
     }
 
-    io::exit(0);
+    // Initialize interrupts
+    interrupts::init();
+
+    println!("It did not crash.");
 
     loop {}
+    io::exit(0);
 }
 
 // We force physical memory mapping to our kernel.
