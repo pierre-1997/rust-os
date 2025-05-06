@@ -522,6 +522,196 @@ pub struct GDTR {
     base: u64,
 }
 
+impl GDTR {
+    /// Prints the GDT
+    pub fn print() {
+        let mut gdtr = GDTR { limit: 0, base: 0 };
+        unsafe {
+            asm!(
+                "sgdt [{gdtr}]",
+                gdtr = in(reg) &mut gdtr,
+                options(nostack, preserves_flags)
+            );
+        }
+
+        // let ptr = &gdtr as *const GDTR as *const u8;
+        // let limit = unsafe { *(ptr as *const u16) };
+        let limit = gdtr.limit;
+        let base = gdtr.base;
+        // let base = unsafe { *(ptr.add(2) as *const u64) };
+
+        println!("GDT: limit = {} + 1 bytes, base = {:#x}", limit, base);
+
+        let mut gdt = base as *mut u64;
+
+        // We're in 64-bit, so I'm hardcoding this 8.
+        let nb_entries = (gdtr.limit + 1) / 8;
+        println!("Number of entries in the GDT: {}", nb_entries);
+
+        for i in 0..nb_entries {
+            println!("Entry #{}: {:p} = {:#016X}", i, gdt, *gdt);
+            println!("{}", SegmentDescriptor(*gdt));
+
+            // TODO: The last one must be the TSS?
+
+            // Go to the next entry
+            gdt = unsafe { gdt.add(1) };
+        }
+    }
+}
+
+extern "x86-interrupt" fn default_interrupt() {
+    println!("INTERRRRUPPPPTTT");
+    loop {}
+}
+
+struct IDT {
+    handlers: OnceCell<[GateDescriptor; 256]>,
+}
+
+impl IDT {
+    fn init() {
+        // Safety: This is the first time with interact with `INTERRUPT_DESCRIPTOR_TABLE`.
+        let _ = INTERRUPT_DESCRIPTOR_TABLE
+            .handlers
+            .set(core::array::from_fn(|i| {
+                if i == 8 || i == 11 {
+                    GateDescriptor::new(default_interrupt as u64, 0x08, DPL::Ring0, GateType::Trap)
+                } else {
+                    GateDescriptor::default()
+                }
+            }));
+    }
+}
+
+// Safety: We're in a single-threaded environment for now.
+unsafe impl Sync for IDT {}
+
+// FIXME: Set at compile time, is it correct ?
+static INTERRUPT_DESCRIPTOR_TABLE: IDT = IDT {
+    handlers: OnceCell::new(),
+};
+
+// Interrupt Table Descriptor
+#[repr(C, packed)]
+struct IDTR {
+    limit: u16,
+    base: u64,
+}
+
+impl IDTR {
+    fn print() {
+        let mut idtr = IDTR { limit: 0, base: 0 };
+        unsafe {
+            asm!(
+                    "sidt [{idtr}]",
+                    idtr = in(reg) &mut idtr,
+                options(nostack, preserves_flags)
+            );
+        }
+
+        // let ptr = &idtr as *const IDTR as *const u8;
+        // let limit = unsafe { *(ptr as *const u16) };
+        let limit = idtr.limit;
+        let base = idtr.base;
+        // let base = unsafe { *(ptr.add(2) as *const u64) };
+
+        println!("IDT: limit = {} + 1 bytes, base = {:#X}", limit, base);
+        let nb_entries = (idtr.limit + 1) / 16;
+        println!("Number of entries in the IDT: {}", nb_entries);
+    }
+}
+
+enum GateType {
+    Interrupt,
+    Trap,
+}
+
+impl TryFrom<u8> for GateType {
+    type Error = &'static str;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0xE => Ok(GateType::Interrupt),
+            0xF => Ok(GateType::Trap),
+            _ => Err("Invalid value for a GateType."),
+        }
+    }
+}
+
+/// A entry in the IDTR that gives points to the function to run on interrupt.
+#[derive(Default)]
+struct GateDescriptor(u64, u64);
+
+impl GateDescriptor {
+    fn new(fn_ptr: u64, selector: u16, dpl: DPL, gtype: GateType) -> Self {
+        let mut descriptor = GateDescriptor(0, 0);
+        descriptor.set_offset(fn_ptr);
+        descriptor.set_selector(selector);
+        descriptor.set_dpl(dpl);
+        descriptor.set_gate_type(gtype);
+        descriptor.set_p(true);
+
+        descriptor
+    }
+
+    fn offset(&self) -> u64 {
+        let upper = self.1.get_bits(31, 32);
+        let lower_first = self.1.get_bits(63, 16);
+        let lower_rest = self.1.get_bits(15, 16);
+
+        (upper << 32) | (lower_first << 32) | lower_rest
+    }
+
+    fn set_offset(&mut self, offset: u64) {
+        self.0.set_bits(31, 32, offset >> 32);
+        self.1.set_bits(63, 16, offset.get_bits(32, 16));
+        self.1.set_bits(15, 16, offset.get_bits(15, 16));
+    }
+
+    fn p(&self) -> bool {
+        self.1.get_bit(47)
+    }
+
+    fn set_p(&mut self, value: bool) {
+        self.1.set_bit(47, value);
+    }
+
+    fn dpl(&self) -> DPL {
+        (self.1.get_bits(46, 2) as u8)
+            .try_into()
+            .expect("Invalid DPL found in GateDescriptor.")
+    }
+
+    fn set_dpl(&mut self, dpl: DPL) {
+        self.1.set_bits(46, 2, dpl as u64);
+    }
+
+    fn gate_type(&self) -> GateType {
+        (self.1.get_bits(43, 4) as u8)
+            .try_into()
+            .expect("Invalid GateType found in GateDescriptor.")
+    }
+
+    fn set_gate_type(&mut self, gtype: GateType) {
+        self.1.set_bits(43, 4, gtype as u64);
+    }
+
+    /// Offset to the IST (Interrupt Stack Table) stored in the TSS (Task State Segment). If set
+    /// to 0, means the IST is not used.
+    fn ist(&self) -> u8 {
+        self.1.get_bits(34, 3) as u8
+    }
+
+    fn selector(&self) -> u16 {
+        self.1.get_bits(31, 16) as u16
+    }
+
+    fn set_selector(&mut self, selector: u16) {
+        self.1.set_bits(31, 16, selector as u64);
+    }
+}
+
 pub fn init() {
     // 0. Generate the table we will load, and get a pointer to it.
     // let tss = TSS::long_mode();
@@ -580,7 +770,7 @@ pub fn init() {
         );
     }
 
-    // 2. Upload the table
+    // 2. Tell the CPU where the Table is
     unsafe {
         asm!(
             "lgdt [{}]",
@@ -591,8 +781,7 @@ pub fn init() {
     // Read it to check that it worked.
     GDTR::print();
 
-    // 3. Tell the CPU where the Table is
-    // 4. Reload segment registers
+    // 3. Reload segment registers
     unsafe {
         asm!(
             // Reload the CS (Code Segment) register:
@@ -614,47 +803,39 @@ pub fn init() {
         );
     };
 
+    // 6. IDT
+    IDT::init();
+    let handlers = INTERRUPT_DESCRIPTOR_TABLE
+        .handlers
+        .get()
+        .expect("INTERRUPT_DESCRIPTOR_TABLE should have been set by now.");
+
+    let handlers_ptr = handlers.as_ptr() as *const u64;
+    let limit = 256 * 16 - 1;
+
+    let idtr = IDTR {
+        limit: limit as u16,
+        base: handlers_ptr as u64,
+    };
+
+    unsafe {
+        asm!(
+            "lidt [{idt_ptr}]",
+            idt_ptr = in(reg) &idtr,
+            options(nostack, preserves_flags)
+        );
+    }
+
     // Re-enable interrupts
+    unsafe {
+        asm!("cli", options(nostack, preserves_flags));
+    }
+
+    // Read the IDT to check that it worked
+    IDTR::print();
 
     // Maybe:
     // 5. LDT
-    // 6. IDT
-}
-
-impl GDTR {
-    /// Prints the GDT
-    pub fn print() {
-        let mut gdtr = GDTR { limit: 0, base: 0 };
-        unsafe {
-            asm!(
-                "sgdt [{}]",
-                in(reg) &mut gdtr,
-                options(nostack, preserves_flags)
-            );
-        }
-
-        let ptr = &gdtr as *const GDTR as *const u8;
-        let limit = unsafe { *(ptr as *const u16) };
-        let base = unsafe { *(ptr.add(2) as *const u64) };
-
-        println!("GDT: limit = {} bytes, base = {:#x}", limit + 1, base);
-
-        let mut gdt = base as *mut u64;
-
-        // We're in 64-bit, so I'm hardcoding this 8.
-        let nb_words = (gdtr.limit + 1) / 8;
-        println!("Number of entries in the GDT: {}", nb_words);
-
-        for i in 0..nb_words {
-            println!("Entry #{}: {:p} = {:#016X}", i, gdt, *gdt);
-            println!("{}", SegmentDescriptor(*gdt));
-
-            // TODO: The last one must be the TSS?
-
-            // Go to the next entry
-            gdt = unsafe { gdt.add(1) };
-        }
-    }
 }
 
 #[cfg(test)]

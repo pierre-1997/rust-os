@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(custom_test_frameworks)]
+#![feature(abi_x86_interrupt)]
 #![test_runner(crate::testing::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
@@ -24,6 +25,12 @@ struct U64Cell(OnceCell<u64>);
 unsafe impl Sync for U64Cell {}
 
 static PHYS_MEM_OFFSET: U64Cell = U64Cell(OnceCell::new());
+
+macro_rules! interrupt {
+    ($num:expr) => {
+        unsafe { core::arch::asm!(concat!("int ", stringify!($num))) }
+    };
+}
 
 /// This function is called on panic.
 #[panic_handler]
@@ -94,7 +101,11 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
     // Initialize interrupts
     interrupts::init();
 
-    println!("It did not crash.");
+    println!("It did not crash. Triggering interrupt");
+
+    interrupt!(11);
+
+    println!("Done");
 
     loop {}
     io::exit(0);
