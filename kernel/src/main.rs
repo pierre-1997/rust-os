@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(custom_test_frameworks)]
+#![feature(abi_x86_interrupt)]
 #![test_runner(crate::testing::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
@@ -25,6 +26,12 @@ unsafe impl Sync for U64Cell {}
 
 static PHYS_MEM_OFFSET: U64Cell = U64Cell(OnceCell::new());
 
+macro_rules! interrupt {
+    ($num:expr) => {
+        unsafe { core::arch::asm!(concat!("int ", stringify!($num))) }
+    };
+}
+
 /// This function is called on panic.
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -33,7 +40,7 @@ fn panic(info: &PanicInfo) -> ! {
         print!("[{}:{}] ", location.file(), location.line());
     }
 
-    println!("{}", info.message());
+    println!("{}\n", info.message());
 
     loop {}
     io::exit(1);
@@ -77,6 +84,15 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
     allocator::init(boot_info);
     allocator::print_free_segments();
 
+    // Initialize interrupts
+    interrupts::init();
+
+    println!("It did not crash. Triggering interrupt");
+
+    interrupt!(3);
+
+    println!("Done");
+
     {
         let mut v: alloc::vec::Vec<usize> = alloc::vec::Vec::with_capacity(10);
         v.push(1);
@@ -90,11 +106,6 @@ fn kernel_main(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
         v1.push(3);
         println!("v = {:?}", v1);
     }
-
-    // Initialize interrupts
-    interrupts::init();
-
-    println!("It did not crash.");
 
     loop {}
     io::exit(0);

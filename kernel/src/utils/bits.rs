@@ -9,7 +9,7 @@ pub trait GetBit {
     /// Gets multiple bits.
     ///
     /// NOTE: `first_idx` is the index of the first bit to get.
-    fn get_bits(&self, first_idx: usize, len: usize) -> Self;
+    fn get_bits(&self, first_idx: u32, len: u32) -> Self;
 }
 
 pub trait SetBit {
@@ -31,8 +31,8 @@ macro_rules! impl_get_bit {
                 (self & (1 << idx)) != 0
             }
 
-            fn get_bits(&self, first_idx: usize, len: usize) -> Self {
-                let mask = (1 << len) - 1;
+            fn get_bits(&self, first_idx: u32, len: u32) -> Self {
+                let mask = Self::MAX >> (Self::BITS - len);
 
                 (self >> ((first_idx + 1) - len)) & mask
             }
@@ -99,6 +99,9 @@ mod tests {
 
                 assert_eq!(0x0000000012345678u64.get_bits(31, 32), 0x12345678);
                 assert_eq!(0x1234567800000000u64.get_bits(63, 32), 0x12345678);
+
+                assert_eq!(0x0123456789ABCDEFu64.get_bits(31, 16), 0x89AB);
+                assert_eq!(0x0123456789ABCDEFu64.get_bits(15, 16), 0xCDEF);
             },
         }
     }
@@ -135,6 +138,14 @@ mod tests {
                 let mut v = 0u64;
                 v.set_bits(63, 32, 0x12345678);
                 assert_eq!(v, 0x1234567800000000);
+
+                let mut v = 0u64;
+                v.set_bits(63, 16, 0x89AB);
+                assert_eq!(v, 0x89AB000000000000);
+
+                let mut v = 0u64;
+                v.set_bits(15, 16, 0xCDEF);
+                assert_eq!(v, 0x000000000000CDEF);
             },
         }
     }

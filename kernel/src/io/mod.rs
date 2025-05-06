@@ -16,7 +16,7 @@ unsafe fn inb(port: u16) -> u8 {
     ret
 }
 
-unsafe fn outb(port: u16, value: u8) {
+pub unsafe fn outb(port: u16, value: u8) {
     asm!(
         r#"
         out %al, %dx
